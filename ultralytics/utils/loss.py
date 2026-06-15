@@ -509,7 +509,7 @@ class v8DetectionLoss:
         (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor, target_scores), loss, loss_detach = \
             self.get_assigned_targets_and_loss(preds_main, batch)
 
-        if self.centers is not None and fg_mask.sum() > 0:
+        if self.centers is not None and "embeddings" in preds_main and fg_mask.sum() > 0:
             embeddings = preds_main["embeddings"]  # (bs, embed_dim, num_anchors)
             # fg_mask shape: (bs, num_anchors)
             pos_mask = fg_mask.bool()
@@ -524,7 +524,7 @@ class v8DetectionLoss:
             centers_batch = self.centers[pos_labels]  # (num_pos, embed_dim)
             embed_loss = F.mse_loss(pos_embeddings, centers_batch)  # 简单用 MSE 拉近
             loss += self.embed_loss_weight * embed_loss
-            loss_detach = torch.cat((loss_detach, embed_loss.detach().unsqueeze(0)))
+            # loss_detach = torch.cat((loss_detach, embed_loss.detach().unsqueeze(0)))
         # ------------------------------------------------------ #
 
         return loss * batch_size, loss_detach

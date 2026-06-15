@@ -335,7 +335,7 @@ class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
 
     def __init__(
-        self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None
+        self, model: torch.nn.Module, tal_topk: int = 10, tal_topk2: int | None = None, embed_loss_weight=0.1
     ):  # model must be de-paralleled
         """Initialize v8DetectionLoss with model parameters and task-aligned assignment settings."""
         device = next(model.parameters()).device  # get model device
@@ -351,6 +351,19 @@ class v8DetectionLoss:
         self.device = device
 
         self.use_dfl = m.reg_max > 1
+
+        # ----------------------------------------------------- #
+        # 新增嵌入损失设置：如果 embed_loss_weight > 0 则启用嵌入损失，并根据模型配置获取 embed_dim
+        self.end2end = m.end2end   # 添加这一行
+        self.embed_dim = getattr(m, 'embed_dim', 0)
+        self.embed_loss_weight = embed_loss_weight
+        
+        if self.embed_loss_weight > 0 and self.embed_dim > 0:
+            # 每个类别一个可学习的中心向量
+            self.centers = nn.Parameter(torch.randn(self.nc, self.embed_dim, device=device))
+        else:
+            self.centers = None
+        # ----------------------------------------------------- #
 
         # Class weights for handling imbalanced datasets
         self.class_weights = getattr(model, "class_weights", None)
@@ -453,11 +466,19 @@ class v8DetectionLoss:
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.cls  # cls gain
         loss[2] *= self.hyp.dfl  # dfl gain
+        # return (
+        #     (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
+        #     loss,
+        #     loss.detach(),
+        # )  # loss(box, cls, dfl)
+
+        # ------------------------------------------------------- #
         return (
-            (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor),
+            (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor, target_scores),
             loss,
             loss.detach(),
-        )  # loss(box, cls, dfl)
+        )
+        # ------------------------------------------------------- #
 
     def parse_output(
         self, preds: dict[str, torch.Tensor] | tuple[torch.Tensor, dict[str, torch.Tensor]]
@@ -476,7 +497,36 @@ class v8DetectionLoss:
     def loss(self, preds: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate detection loss using assigned targets."""
         batch_size = preds["boxes"].shape[0]
-        loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
+        # loss, loss_detach = self.get_assigned_targets_and_loss(preds, batch)[1:]
+
+        # ------------------------------------------------------ #
+        # 如果使用 end2end，我们只从 one2many 分支取嵌入（one2one 通常不包含嵌入）
+        if self.end2end:  # 注意：此处需要检测是否有 end2end，可在 __init__ 中保存 end2end 标志
+            preds_main = preds["one2many"]
+        else:
+            preds_main = preds
+        
+        (fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor, target_scores), loss, loss_detach = \
+            self.get_assigned_targets_and_loss(preds_main, batch)
+
+        if self.centers is not None and fg_mask.sum() > 0:
+            embeddings = preds_main["embeddings"]  # (bs, embed_dim, num_anchors)
+            # fg_mask shape: (bs, num_anchors)
+            pos_mask = fg_mask.bool()
+            pos_embeddings = embeddings.permute(0, 2, 1)[pos_mask]  # (num_pos, embed_dim)
+            
+            # 获取每个正样本的类别索引：target_scores 是 soft one-hot，取 argmax 或 直接取非零位置
+            # target_scores shape: (bs, num_anchors, nc)，正样本位置的值是非零的
+            pos_scores = target_scores[pos_mask]  # (num_pos, nc)
+            pos_labels = pos_scores.argmax(dim=1)  # (num_pos,)
+            
+            # Center Loss
+            centers_batch = self.centers[pos_labels]  # (num_pos, embed_dim)
+            embed_loss = F.mse_loss(pos_embeddings, centers_batch)  # 简单用 MSE 拉近
+            loss += self.embed_loss_weight * embed_loss
+            loss_detach = torch.cat((loss_detach, embed_loss.detach().unsqueeze(0)))
+        # ------------------------------------------------------ #
+
         return loss * batch_size, loss_detach
 
 

@@ -1890,26 +1890,51 @@ def parse_model(d, ch, verbose=True):
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        # elif m in frozenset(
+        #     {
+        #         Detect,
+        #         WorldDetect,
+        #         YOLOEDetect,
+        #         Segment,
+        #         Segment26,
+        #         YOLOESegment,
+        #         YOLOESegment26,
+        #         Pose,
+        #         Pose26,
+        #         OBB,
+        #         OBB26,
+        #     }
+        # ):
+        #     args.extend([reg_max, end2end, [ch[x] for x in f]])
+        #     if m is Segment or m is YOLOESegment or m is Segment26 or m is YOLOESegment26:
+        #         args[2] = make_divisible(min(args[2], max_channels) * width, 8)
+        #     if m in {Detect, YOLOEDetect, Segment, Segment26, YOLOESegment, YOLOESegment26, Pose, Pose26, OBB, OBB26}:
+        #         m.legacy = legacy
+        # ----------------------------------------- #
         elif m in frozenset(
             {
-                Detect,
-                WorldDetect,
-                YOLOEDetect,
-                Segment,
-                Segment26,
-                YOLOESegment,
-                YOLOESegment26,
-                Pose,
-                Pose26,
-                OBB,
-                OBB26,
+                Detect, WorldDetect, YOLOEDetect,
+                Segment, Segment26, YOLOESegment, YOLOESegment26,
+                Pose, Pose26, OBB, OBB26,
             }
         ):
+            # 原始 args 可能是 [nc] 或 [nc, embed_dim]
+            # 1. 取出 nc 和可能存在的额外参数
+            extra_args = args[1:]        # 例如 (embed_dim,) 或为空
+            args = [args[0]]            # 只保留 nc
+
+            # 2. 按原始顺序追加 reg_max, end2end, ch
             args.extend([reg_max, end2end, [ch[x] for x in f]])
-            if m is Segment or m is YOLOESegment or m is Segment26 or m is YOLOESegment26:
+
+            # 3. 追加用户在 yaml 中写的额外参数（如 embed_dim）
+            args.extend(extra_args)
+
+            # 原有特殊处理保持不变
+            if m in {Segment, YOLOESegment, Segment26, YOLOESegment26}:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
             if m in {Detect, YOLOEDetect, Segment, Segment26, YOLOESegment, YOLOESegment26, Pose, Pose26, OBB, OBB26}:
                 m.legacy = legacy
+        # ----------------------------------------- #
         elif m is SemanticSegment:
             args.append([ch[x] for x in f])  # nc, ch tuple
         elif m is v10Detect:

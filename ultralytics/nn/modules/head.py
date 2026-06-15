@@ -86,7 +86,7 @@ class Detect(nn.Module):
     legacy = False  # backward compatibility for v3/v5/v8/v9 models
     xyxy = False  # xyxy or xywh output
 
-    def __init__(self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = ()):
+    def __init__(self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = (), embed_dim=64):
         """Initialize the YOLO detection layer with specified number of classes and channels.
 
         Args:
@@ -94,6 +94,8 @@ class Detect(nn.Module):
             reg_max (int): Maximum number of DFL channels.
             end2end (bool): Whether to use end-to-end NMS-free detection.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
+            新增：
+            embed_dim (int): Dimension of the embedding layer.
         """
         super().__init__()
         self.nc = nc  # number of classes
@@ -117,6 +119,16 @@ class Detect(nn.Module):
                 for x in ch
             )
         )
+
+        # ----------------------------------------- #
+        # 新增嵌入分支：每个检测头输出 embed_dim 个通道
+        self.embed_dim = embed_dim
+        self.cv4 = nn.ModuleList(
+            nn.Sequential(Conv(x, x // 4, 3), Conv(x // 4, x // 8, 3), nn.Conv2d(x // 8, embed_dim, 1))
+            for x in ch
+        )
+        # ----------------------------------------- #
+
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
         if end2end:
@@ -159,6 +171,18 @@ class Detect(nn.Module):
     ) -> dict[str, torch.Tensor] | torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         preds = self.forward_head(x, **self.one2many)
+
+        # ----------------------------------------- #
+        # ★ 关键：只有训练时才计算嵌入
+        if self.training:
+            bs = x[0].shape[0]
+            embeddings = torch.cat(
+                [self.cv4[i](x[i]).view(bs, self.embed_dim, -1) for i in range(self.nl)],
+                dim=-1
+            )
+            preds["embeddings"] = embeddings
+        # ----------------------------------------- #
+
         if self.end2end:
             x_detach = [xi.detach() for xi in x]
             one2one = self.forward_head(x_detach, **self.one2one)

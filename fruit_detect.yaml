@@ -1,0 +1,22 @@
+path: D:/AI_train_Datasets/FruitsDataset/combine  # 数据集的根目录绝对路径
+train:
+  - images/train
+val: images/val      # 验证集图像路径，相对于 `path`
+
+# 自动推导出标注路径的规则：
+# 训练标注路径 = path + 'labels/train'
+# 验证标注路径 = path + 'labels/val'
+
+# 类别数量
+nc: 9
+# 类别名称
+names:
+  0: Apple
+  1: Watermelon
+  2: Orange
+  3: Banana
+  4: Strawberry
+  5: Kiwifruit
+  6: Pineapple
+  7: Durian
+  8: Pitaya

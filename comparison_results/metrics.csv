@@ -1,0 +1,5 @@
+Model,Precision,Recall,mAP@0.5,FPS
+best,0.8055,0.8015,0.8906,133.26
+my_yolo11_embed,0.7946,0.7934,0.8651,125.68
+my_yolo11_embed_DCN,0.7767,0.7604,0.8592,112.93
+my_yolo11_embed_proto,0.7281,0.8109,0.8868,135.54
